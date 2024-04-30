@@ -8,9 +8,11 @@ from validators.phone_number_validator import validate_phone_number
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
+from registration_service import RegistrationService
 
 
 router = Router(name=__name__)
+registration_service = RegistrationService()
 
 
 class TeamInfo(StatesGroup):
@@ -22,27 +24,25 @@ class TeamInfo(StatesGroup):
     report = State()
 
 
-KEY_FILE_LOCATION = 'tg-bot-421112-4814e071cafa.json'
-SHEET_ID="12rKgsq0zUmgP2lykXcpry9KuUmmTzj18qRGYE_pjdbM"
-
-# Аутентификация с помощью API ключа
-scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_FILE_LOCATION, scope)
-gc = gspread.authorize(creds)
-
+# KEY_FILE_LOCATION = 'tg-bot-421112-4814e071cafa.json'
+# SHEET_ID="12rKgsq0zUmgP2lykXcpry9KuUmmTzj18qRGYE_pjdbM"
+#
+# # Аутентификация с помощью API ключа
+# scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+# creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_FILE_LOCATION, scope)
+# gc = gspread.authorize(creds)
 max_team_size = 10
 
-# Открываем таблицу
-sheet = gc.open_by_key(SHEET_ID)
-worksheet = sheet.sheet1
+# # Открываем таблицу
+# sheet = gc.open_by_key(SHEET_ID)
+# worksheet = sheet.sheet1
 
 
 def reg_button():
-    dates_data = worksheet.get_all_records()
-    available_dates = [row["Date"] for row in dates_data if row.get("DateInfo", "").lower() != "full"]
+    available_dates = registration_service.get_available_dates()
     buttons = []
     for date in available_dates:
-        time_address = worksheet.cell(worksheet.find(date).row, worksheet.find("Time&Address").col).value
+        time_address = registration_service.get_time_and_address(date)
         button = InlineKeyboardButton(text=date, callback_data=f"date{date}time_address{time_address}")
         buttons.append([button])
     if not available_dates:
@@ -142,19 +142,21 @@ async def handle_invalid_phone_number(message: types.Message):
 @router.callback_query(F.data == "confirm_yes")
 async def handle_confirm_yes(call: CallbackQuery, state: FSMContext):
     user_id = call.from_user.id
-    user_name = call.from_user.username
-    if not user_name:
-        user_name = "NO USERNAME"
-    # Получаем данные из state
+    user_name = call.from_user.username or "NO USERNAME"
     data = await get_data(state)
-    new_row = [user_id, user_name, data[1], data[2], data[3], data[4]]
-    worksheet2 = sheet.worksheet(data[0])
-    worksheet2.append_row(new_row)
-    if len(worksheet2.get_all_records()) == max_team_size:
-        date_cell = worksheet.find(data[0])
-        worksheet.update_cell(date_cell.row, 2, "full")
+    team_data = {
+        "date": data[0],
+        "user_id": user_id,
+        "user_name": user_name,
+        "team_name": data[1],
+        "team_size": data[2],
+        "leader_name": data[3],
+        "phone_number": data[4]
+    }
+    registration_service.register_team(team_data)
     await call.message.edit_text("Ваша заявка принята!", reply_markup=None)
     await state.clear()
+
 
 async def get_data(state: FSMContext):
     data = await state.get_data()
@@ -186,13 +188,7 @@ async def send_user_info(state: FSMContext) -> str:
 
 
 def check_button(user_id):
-    dates_data = worksheet.get_all_records()
-    for sheet_name in [dates_data[0].get("Date"), dates_data[1].get("Date"), dates_data[2].get("Date")]:
-        worksheet3 = sheet.worksheet(sheet_name)
-        cell = worksheet3.find(str(user_id))
-        if cell:
-            return True
-    return False
+    return registration_service.is_user_registered(user_id)
 
 
 

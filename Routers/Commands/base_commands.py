@@ -27,10 +27,11 @@ async def process_help(message: Message):
 
 @router.message(F.text == ButtonText.REG)
 async def handle_reg_button(message: Message):
-    if reg_button() != False:
+    markup = reg_button()  # No need to check for False, the function handles it
+    if markup:
         await message.answer(
             text="Выберите подохдящую дату: ",
-            reply_markup=reg_button()
+            reply_markup=markup
         )
     else:
         await message.answer(text="К сожалению, нет доступных дат для регистрации.")
